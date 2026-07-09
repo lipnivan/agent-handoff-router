@@ -20,6 +20,15 @@ class MessageError(ValueError):
 
 
 @dataclass
+class MessageInspection:
+    path: Path
+    kind: str
+    frontmatter: dict[str, Any] | None = None
+    body: str = ""
+    error: str | None = None
+
+
+@dataclass
 class Message:
     path: Path
     frontmatter: dict[str, Any]
@@ -85,7 +94,7 @@ def _parse_iso8601(value: str) -> None:
         raise MessageError(f"invalid created_at: {value}") from exc
 
 
-def parse_message(path: str | Path) -> Message:
+def _load_frontmatter(path: str | Path) -> tuple[dict[str, Any], str]:
     message_path = Path(path)
     text = message_path.read_text(encoding="utf-8")
     if not text.startswith("---\n"):
@@ -97,8 +106,39 @@ def parse_message(path: str | Path) -> Message:
     frontmatter = simple_yaml.loads(fm_text) or {}
     if not isinstance(frontmatter, dict):
         raise MessageError("frontmatter must be a mapping")
-    validate_frontmatter(frontmatter)
-    return Message(path=message_path, frontmatter=frontmatter, body=body.lstrip("\n"))
+    return frontmatter, body.lstrip("\n")
+
+
+def inspect_message(path: str | Path) -> MessageInspection:
+    message_path = Path(path)
+    text = message_path.read_text(encoding="utf-8")
+    if not text.startswith("---\n"):
+        return MessageInspection(path=message_path, kind="ignored")
+    try:
+        frontmatter, body = _load_frontmatter(message_path)
+    except MessageError as exc:
+        return MessageInspection(path=message_path, kind="invalid", error=str(exc))
+    schema = frontmatter.get("schema")
+    if schema is None:
+        return MessageInspection(path=message_path, kind="legacy", frontmatter=frontmatter, body=body)
+    if schema != "agent-handoff-message/v1":
+        return MessageInspection(path=message_path, kind="unsupported_schema", frontmatter=frontmatter, body=body)
+    try:
+        validate_frontmatter(frontmatter)
+    except MessageError as exc:
+        return MessageInspection(path=message_path, kind="invalid", frontmatter=frontmatter, body=body, error=str(exc))
+    return MessageInspection(path=message_path, kind="valid", frontmatter=frontmatter, body=body)
+
+
+def parse_message(path: str | Path) -> Message:
+    inspection = inspect_message(path)
+    if inspection.kind == "ignored":
+        raise MessageError("message must start with YAML frontmatter")
+    if inspection.kind in {"legacy", "unsupported_schema"}:
+        raise MessageError("message does not declare supported schema")
+    if inspection.kind != "valid" or inspection.frontmatter is None:
+        raise MessageError(inspection.error or "invalid message")
+    return Message(path=inspection.path, frontmatter=inspection.frontmatter, body=inspection.body)
 
 
 def validate_frontmatter(frontmatter: dict[str, Any]) -> None:
@@ -126,14 +166,19 @@ def discover_message_paths(config: RouterConfig) -> list[Path]:
     return sorted(path for path in candidates if path.is_file() and path.suffix == ".md")
 
 
-def discover_messages(config: RouterConfig) -> tuple[list[Message], list[dict[str, Any]]]:
+def discover_messages(config: RouterConfig) -> tuple[list[Message], list[dict[str, Any]], list[dict[str, Any]]]:
     messages: list[Message] = []
     errors: list[dict[str, Any]] = []
+    legacy: list[dict[str, Any]] = []
     for path in discover_message_paths(config):
-        if not path.read_text(encoding="utf-8").startswith("---\n"):
+        inspection = inspect_message(path)
+        if inspection.kind == "ignored":
             continue
-        try:
-            messages.append(parse_message(path))
-        except MessageError as exc:
-            errors.append({"path": str(path), "error": str(exc)})
-    return messages, errors
+        if inspection.kind == "valid" and inspection.frontmatter is not None:
+            messages.append(Message(path=inspection.path, frontmatter=inspection.frontmatter, body=inspection.body))
+            continue
+        if inspection.kind in {"legacy", "unsupported_schema"}:
+            legacy.append({"path": str(path), "kind": inspection.kind})
+            continue
+        errors.append({"path": str(path), "error": inspection.error or "invalid message"})
+    return messages, errors, legacy

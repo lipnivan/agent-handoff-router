@@ -44,10 +44,10 @@ class Router:
     def save_state(self, state: dict[str, Any]) -> None:
         write_json_file(self.config.state_file, state)
 
-    def candidate_messages(self) -> tuple[list[Message], list[dict[str, Any]]]:
+    def candidate_messages(self) -> tuple[list[Message], list[dict[str, Any]], list[dict[str, Any]]]:
         return discover_messages(self.config)
 
-    def scan(self, route: bool = False, pull: bool | None = None) -> list[RouteResult]:
+    def scan(self, route: bool = False, pull: bool | None = None, include_legacy: bool = False) -> list[RouteResult]:
         results: list[RouteResult] = []
         if pull is None:
             pull = self.config.pull_before_scan
@@ -63,13 +63,20 @@ class Router:
                         details={"error": str(exc)},
                     )
                 )
-        messages, errors = self.candidate_messages()
+        messages, errors, legacy = self.candidate_messages()
         results.extend(
             [
-            RouteResult(status="invalid", action="parse", path=entry["path"], details={"error": entry["error"]})
-            for entry in errors
+                RouteResult(status="invalid", action="parse", path=entry["path"], details={"error": entry["error"]})
+                for entry in errors
             ]
         )
+        if include_legacy:
+            results.extend(
+                [
+                    RouteResult(status="legacy", action="ignore", path=entry["path"], details={"kind": entry["kind"]})
+                    for entry in legacy
+                ]
+            )
         for message in messages:
             if route:
                 results.append(self.route_message(message))

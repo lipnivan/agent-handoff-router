@@ -22,6 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--once", action="store_true")
     scan.add_argument("--route", action="store_true")
     scan.add_argument("--no-pull", action="store_true")
+    scan.add_argument("--include-legacy", action="store_true")
 
     route = subparsers.add_parser("route")
     route.add_argument("path")
@@ -42,7 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
 def cmd_status(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     router = Router(config)
-    messages, errors = router.candidate_messages() if config.handoff_repo_dir.exists() else ([], [])
+    messages, errors, legacy = router.candidate_messages() if config.handoff_repo_dir.exists() else ([], [], [])
     state_exists = config.state_file.exists()
     print(f"config: {args.config}")
     print(f"handoff_repo_path: {config.handoff_repo_path}")
@@ -51,6 +52,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"state_exists: {state_exists}")
     print(f"dry_run: {config.dry_run}")
     print(f"messages: {len(messages)}")
+    print(f"legacy_ignored: {len(legacy)}")
     print(f"parse_errors: {len(errors)}")
     return 0
 
@@ -58,7 +60,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 def cmd_scan(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     router = Router(config)
-    results = router.scan(route=args.route, pull=not args.no_pull)
+    results = router.scan(route=args.route, pull=not args.no_pull, include_legacy=args.include_legacy)
     for result in results:
         print(json.dumps(result.to_dict(), sort_keys=True))
     return 0 if results else 0
@@ -74,8 +76,8 @@ def cmd_route(args: argparse.Namespace) -> int:
 
 def cmd_messages(args: argparse.Namespace) -> int:
     config = load_config(args.config)
-    messages, errors = discover_messages(config) if config.handoff_repo_dir.exists() else ([], [])
-    payload = {"messages": [message.to_summary() for message in messages], "errors": errors}
+    messages, errors, legacy = discover_messages(config) if config.handoff_repo_dir.exists() else ([], [], [])
+    payload = {"messages": [message.to_summary() for message in messages], "errors": errors, "legacy": legacy}
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:

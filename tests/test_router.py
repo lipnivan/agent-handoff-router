@@ -3,8 +3,10 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from handoff_router.config import RouterConfig
+from handoff_router.cli import cmd_scan
 from handoff_router.router import Router
 
 
@@ -52,6 +54,14 @@ status: new
 ---
 
 Bad
+"""
+
+LEGACY_MESSAGE = """---
+title: Legacy note
+source: chatgpt
+---
+
+Old body
 """
 
 
@@ -152,6 +162,84 @@ class RouterTests(unittest.TestCase):
             self.assertEqual(result.status, "failed")
             state = router.load_state()
             self.assertEqual(state["messages"][str(path)]["status"], "failed")
+
+    def test_scan_marks_malformed_v1_as_invalid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            path = repo / "projects" / "demo" / "inbox" / "chatgpt" / "open" / "bad.md"
+            path.parent.mkdir(parents=True)
+            path.write_text(MALFORMED_MESSAGE, encoding="utf-8")
+            router, _, _ = self.make_router(repo)
+
+            results = router.scan(pull=False)
+
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0].status, "invalid")
+            self.assertIn("missing required fields", results[0].details["error"])
+
+    def test_scan_default_excludes_legacy_messages(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            path = repo / "projects" / "demo" / "inbox" / "chatgpt" / "open" / "legacy.md"
+            path.parent.mkdir(parents=True)
+            path.write_text(LEGACY_MESSAGE, encoding="utf-8")
+            router, _, _ = self.make_router(repo)
+
+            results = router.scan(pull=False)
+
+            self.assertEqual(results, [])
+
+    def test_scan_include_legacy_shows_legacy_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            path = repo / "projects" / "demo" / "inbox" / "chatgpt" / "open" / "legacy.md"
+            path.parent.mkdir(parents=True)
+            path.write_text(LEGACY_MESSAGE, encoding="utf-8")
+            router, _, _ = self.make_router(repo)
+
+            results = router.scan(pull=False, include_legacy=True)
+
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0].status, "legacy")
+            self.assertEqual(results[0].action, "ignore")
+            self.assertEqual(results[0].path, str(path))
+
+    def test_cli_scan_default_excludes_legacy_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            config_path = repo / "config.yaml"
+            legacy_path = repo / "projects" / "demo" / "inbox" / "chatgpt" / "open" / "legacy.md"
+            legacy_path.parent.mkdir(parents=True)
+            legacy_path.write_text(LEGACY_MESSAGE, encoding="utf-8")
+            config_path.write_text(
+                "\n".join(
+                    [
+                        f"handoff_repo_path: {repo}",
+                        f"state_path: {repo / 'state.json'}",
+                        "pull_before_scan: false",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch("sys.stdout.write") as write:
+                exit_code = cmd_scan(
+                    type(
+                        "Args",
+                        (),
+                        {
+                            "config": str(config_path),
+                            "route": False,
+                            "no_pull": True,
+                            "include_legacy": False,
+                            "once": True,
+                        },
+                    )()
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(write.call_args_list, [])
 
 
 if __name__ == "__main__":
