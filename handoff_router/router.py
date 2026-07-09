@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,6 +30,58 @@ class RouteResult:
         }
 
 
+@dataclass
+class PreflightCheck:
+    status: str
+    detail: str = ""
+
+    def to_dict(self) -> dict[str, str]:
+        payload = {"status": self.status}
+        if self.detail:
+            payload["detail"] = self.detail
+        return payload
+
+
+@dataclass
+class PreflightReport:
+    state_parent: PreflightCheck
+    state_file: PreflightCheck
+    handoff_repo: PreflightCheck
+    handoff_repo_writable: PreflightCheck
+    gh: PreflightCheck
+    git: PreflightCheck
+
+    def to_dict(self) -> dict[str, dict[str, str]]:
+        return {
+            "state_parent": self.state_parent.to_dict(),
+            "state_file": self.state_file.to_dict(),
+            "handoff_repo": self.handoff_repo.to_dict(),
+            "handoff_repo_writable": self.handoff_repo_writable.to_dict(),
+            "gh": self.gh.to_dict(),
+            "git": self.git.to_dict(),
+        }
+
+    def routing_ok(self) -> bool:
+        required = [
+            self.state_parent.status == "ok",
+            self.state_file.status in {"ok", "missing"},
+            self.handoff_repo.status == "ok",
+            self.handoff_repo_writable.status == "ok",
+            self.gh.status == "ok",
+            self.git.status == "ok",
+        ]
+        return all(required)
+
+    def summary(self) -> str:
+        failures: list[str] = []
+        for name, check in self.to_dict().items():
+            status = check["status"]
+            if status not in {"ok", "missing"}:
+                detail = check.get("detail", "")
+                failures.append(f"{name}={status}{': ' + detail if detail else ''}")
+        return "; ".join(failures) if failures else "ok"
+
+
 class Router:
     def __init__(
         self,
@@ -47,6 +102,22 @@ class Router:
     def candidate_messages(self) -> tuple[list[Message], list[dict[str, Any]], list[dict[str, Any]]]:
         return discover_messages(self.config)
 
+    def preflight_report(self) -> PreflightReport:
+        state_parent = self._check_state_parent()
+        state_file = self._check_state_file(state_parent)
+        handoff_repo = self._check_handoff_repo()
+        handoff_repo_writable = self._check_handoff_repo_writable(handoff_repo)
+        gh = self._check_command("gh")
+        git = self._check_command("git")
+        return PreflightReport(
+            state_parent=state_parent,
+            state_file=state_file,
+            handoff_repo=handoff_repo,
+            handoff_repo_writable=handoff_repo_writable,
+            gh=gh,
+            git=git,
+        )
+
     def scan(self, route: bool = False, pull: bool | None = None, include_legacy: bool = False) -> list[RouteResult]:
         results: list[RouteResult] = []
         if pull is None:
@@ -63,6 +134,10 @@ class Router:
                         details={"error": str(exc)},
                     )
                 )
+        if route:
+            preflight = self.preflight_report()
+            if not preflight.routing_ok():
+                return [self._preflight_failure_result(preflight, action="scan")]
         messages, errors, legacy = self.candidate_messages()
         results.extend(
             [
@@ -79,7 +154,7 @@ class Router:
             )
         for message in messages:
             if route:
-                results.append(self.route_message(message))
+                results.append(self.route_message(message, skip_preflight=True))
             else:
                 results.append(
                     RouteResult(
@@ -91,9 +166,13 @@ class Router:
                 )
         return results
 
-    def route_path(self, path: str | Path) -> RouteResult:
+    def route_path(self, path: str | Path, *, skip_preflight: bool = False) -> RouteResult:
+        if not skip_preflight:
+            preflight = self.preflight_report()
+            if not preflight.routing_ok():
+                return self._preflight_failure_result(preflight, action="route", path=str(Path(path)))
         try:
-            return self.route_message(parse_message(path))
+            return self.route_message(parse_message(path), skip_preflight=True)
         except MessageError as exc:
             state = self.load_state()
             key = str(Path(path))
@@ -101,7 +180,11 @@ class Router:
             self.save_state(state)
             return RouteResult(status="failed", action="validate", path=key, details={"error": str(exc)})
 
-    def route_message(self, message: Message) -> RouteResult:
+    def route_message(self, message: Message, *, skip_preflight: bool = False) -> RouteResult:
+        if not skip_preflight:
+            preflight = self.preflight_report()
+            if not preflight.routing_ok():
+                return self._preflight_failure_result(preflight, action="route", path=str(message.path))
         state = self.load_state()
         message_key = str(message.path)
         if message.status in {"routed", "resolved"}:
@@ -253,3 +336,72 @@ class Router:
         repo_paths = [path for path in paths if repo_dir in path.parents or path == repo_dir]
         if repo_paths:
             self.git.commit_paths(repo_dir, repo_paths, "router: record routed message")
+
+    def _preflight_failure_result(
+        self,
+        report: PreflightReport,
+        action: str,
+        path: str | None = None,
+    ) -> RouteResult:
+        return RouteResult(
+            status="failed",
+            action="preflight",
+            path=path or str(self.config.state_file),
+            details={"error": f"preflight failed: {report.summary()}", "checks": report.to_dict(), "command": action},
+        )
+
+    def _check_command(self, binary: str) -> PreflightCheck:
+        return PreflightCheck("ok") if shutil.which(binary) else PreflightCheck("error", f"{binary} not found")
+
+    def _check_state_parent(self) -> PreflightCheck:
+        parent = self.config.state_file.parent
+        try:
+            parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return PreflightCheck("error", str(exc))
+        return self._probe_directory_writable(parent)
+
+    def _check_state_file(self, state_parent: PreflightCheck) -> PreflightCheck:
+        state_file = self.config.state_file
+        if state_parent.status != "ok":
+            return PreflightCheck("error", "state parent not writable")
+        if not state_file.exists():
+            return PreflightCheck("missing")
+        try:
+            with state_file.open("r+", encoding="utf-8") as handle:
+                payload = handle.read()
+        except OSError as exc:
+            return PreflightCheck("error", str(exc))
+        try:
+            json.loads(payload)
+        except json.JSONDecodeError as exc:
+            return PreflightCheck("invalid_json", str(exc))
+        return PreflightCheck("ok")
+
+    def _check_handoff_repo(self) -> PreflightCheck:
+        repo_dir = self.config.handoff_repo_dir
+        if not repo_dir.exists():
+            return PreflightCheck("error", "path does not exist")
+        if not repo_dir.is_dir():
+            return PreflightCheck("error", "path is not a directory")
+        return PreflightCheck("ok")
+
+    def _check_handoff_repo_writable(self, handoff_repo: PreflightCheck) -> PreflightCheck:
+        if handoff_repo.status != "ok":
+            return PreflightCheck("error", "handoff repo unavailable")
+        return self._probe_directory_writable(self.config.handoff_repo_dir)
+
+    def _probe_directory_writable(self, directory: Path) -> PreflightCheck:
+        probe_path: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=directory, prefix=".router-write-check-", delete=False) as handle:
+                probe_path = handle.name
+            Path(probe_path).unlink()
+        except OSError as exc:
+            if probe_path:
+                try:
+                    Path(probe_path).unlink(missing_ok=True)
+                except OSError:
+                    pass
+            return PreflightCheck("error", str(exc))
+        return PreflightCheck("ok")

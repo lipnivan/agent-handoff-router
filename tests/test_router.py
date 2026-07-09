@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
 from handoff_router.config import RouterConfig
-from handoff_router.cli import cmd_scan
-from handoff_router.router import Router
+from handoff_router.cli import cmd_scan, cmd_self_check
+from handoff_router.router import PreflightCheck, Router
 
 
 TASK_MESSAGE = """---
@@ -240,6 +242,70 @@ class RouterTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             self.assertEqual(write.call_args_list, [])
+
+    def test_route_aborts_before_create_issue_when_state_parent_preflight_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            path = repo / "projects" / "demo" / "inbox" / "chatgpt" / "open" / "task.md"
+            path.parent.mkdir(parents=True)
+            path.write_text(TASK_MESSAGE, encoding="utf-8")
+            router, github, _ = self.make_router(repo)
+
+            with patch.object(Router, "_check_state_parent", return_value=PreflightCheck("error", "permission denied")), patch.object(
+                Router, "_check_command", return_value=PreflightCheck("ok")
+            ):
+                result = router.route_path(path)
+
+            self.assertEqual(result.status, "failed")
+            self.assertEqual(result.action, "preflight")
+            self.assertEqual(len(github.created), 0)
+            self.assertEqual(list(repo.rglob("*.routed.md")), [])
+            self.assertFalse(router.config.state_file.exists())
+
+    def test_scan_route_aborts_before_writing_report_when_preflight_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            path = repo / "projects" / "demo" / "inbox" / "chatgpt" / "open" / "task.md"
+            path.parent.mkdir(parents=True)
+            path.write_text(TASK_MESSAGE, encoding="utf-8")
+            router, github, _ = self.make_router(repo)
+
+            with patch.object(Router, "_check_state_parent", return_value=PreflightCheck("error", "permission denied")), patch.object(
+                Router, "_check_command", return_value=PreflightCheck("ok")
+            ):
+                results = router.scan(route=True, pull=False)
+
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0].status, "failed")
+            self.assertEqual(results[0].action, "preflight")
+            self.assertEqual(len(github.created), 0)
+            self.assertEqual(list(repo.rglob("*.routed.md")), [])
+
+    def test_self_check_reports_state_parent_problem(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            config_path = repo / "config.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        f"handoff_repo_path: {repo}",
+                        f"state_path: {repo / 'state.json'}",
+                        "pull_before_scan: false",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch.object(Router, "_check_state_parent", return_value=PreflightCheck("error", "permission denied")), patch.object(
+                Router, "_check_command", return_value=PreflightCheck("ok")
+            ):
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = cmd_self_check(type("Args", (), {"config": str(config_path)})())
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("state_parent: error (permission denied)", stdout.getvalue())
 
 
 if __name__ == "__main__":

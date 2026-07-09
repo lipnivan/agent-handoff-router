@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import sys
-from pathlib import Path
 
 from .config import DEFAULT_CONFIG_PATH, dump_example_config, load_config
 from .messages import MessageError, discover_messages, parse_message
@@ -63,7 +61,9 @@ def cmd_scan(args: argparse.Namespace) -> int:
     results = router.scan(route=args.route, pull=not args.no_pull, include_legacy=args.include_legacy)
     for result in results:
         print(json.dumps(result.to_dict(), sort_keys=True))
-    return 0 if results else 0
+    if args.route and any(result.status == "failed" and result.action == "preflight" for result in results):
+        return 1
+    return 0
 
 
 def cmd_route(args: argparse.Namespace) -> int:
@@ -106,15 +106,14 @@ def cmd_init_config(args: argparse.Namespace) -> int:
 
 def cmd_self_check(args: argparse.Namespace) -> int:
     config = load_config(args.config)
-    checks = {
-        "git": shutil.which("git") is not None,
-        "gh": shutil.which("gh") is not None,
-        "handoff_repo_exists": config.handoff_repo_dir.exists(),
-        "state_parent_exists_or_creatable": config.state_file.parent.exists() or config.state_file.parent.parent.exists(),
-    }
-    for key, value in checks.items():
-        print(f"{key}: {'ok' if value else 'missing'}")
-    return 0 if all(checks.values()) else 1
+    router = Router(config)
+    report = router.preflight_report()
+    for name, check in report.to_dict().items():
+        line = f"{name}: {check['status']}"
+        if "detail" in check:
+            line += f" ({check['detail']})"
+        print(line)
+    return 0 if report.routing_ok() else 1
 
 
 def main(argv: list[str] | None = None) -> int:
