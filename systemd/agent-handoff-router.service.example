@@ -1,0 +1,9 @@
+[Unit]
+Description=agent-handoff-router scan service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/agent-handoff-router
+ExecStart=/opt/agent-handoff-router/handoff-router --config /opt/agent-handoff-router/config/config.yaml scan --once --route
