@@ -10,6 +10,8 @@ Flow:
 5. Router records idempotent state and optionally writes a routed report back to the handoff repo.
 6. `agent-runner` later consumes labeled target repo issues as executable tasks.
 
+Smoke test note: the `agent-handoff-router` -> `agent-runner` E2E pipeline was smoke-tested on 2026-07-09.
+
 Boundaries:
 - `agent-handoff` is transport and audit trail, not execution state.
 - Target repository issues are the task source of truth.
