@@ -31,6 +31,20 @@ class RouteResult:
 
 
 @dataclass
+class MessageState:
+    routed: bool
+    action: str
+    details: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = {"routed": self.routed}
+        if self.routed:
+            payload["state_action"] = self.action
+            payload.update(self.details)
+        return payload
+
+
+@dataclass
 class PreflightCheck:
     status: str
     detail: str = ""
@@ -102,6 +116,29 @@ class Router:
     def candidate_messages(self) -> tuple[list[Message], list[dict[str, Any]], list[dict[str, Any]]]:
         return discover_messages(self.config)
 
+    def message_inventory(self) -> dict[str, Any]:
+        messages, errors, legacy = self.candidate_messages()
+        state = self.load_state()
+        summaries: list[dict[str, Any]] = []
+        pending_messages = 0
+        routed_messages = 0
+        for message in messages:
+            classification = self.classify_message(message, state)
+            summaries.append({**message.to_summary(), **classification.to_dict()})
+            if classification.routed:
+                routed_messages += 1
+            else:
+                pending_messages += 1
+        return {
+            "messages": summaries,
+            "pending_messages": pending_messages,
+            "routed_messages": routed_messages,
+            "legacy_ignored": len(legacy),
+            "parse_errors": len(errors),
+            "errors": errors,
+            "legacy": legacy,
+        }
+
     def preflight_report(self) -> PreflightReport:
         state_parent = self._check_state_parent()
         state_file = self._check_state_file(state_parent)
@@ -118,7 +155,13 @@ class Router:
             git=git,
         )
 
-    def scan(self, route: bool = False, pull: bool | None = None, include_legacy: bool = False) -> list[RouteResult]:
+    def scan(
+        self,
+        route: bool = False,
+        pull: bool | None = None,
+        include_legacy: bool = False,
+        include_routed: bool = False,
+    ) -> list[RouteResult]:
         results: list[RouteResult] = []
         if pull is None:
             pull = self.config.pull_before_scan
@@ -139,6 +182,7 @@ class Router:
             if not preflight.routing_ok():
                 return [self._preflight_failure_result(preflight, action="scan")]
         messages, errors, legacy = self.candidate_messages()
+        state = self.load_state()
         results.extend(
             [
                 RouteResult(status="invalid", action="parse", path=entry["path"], details={"error": entry["error"]})
@@ -155,15 +199,27 @@ class Router:
         for message in messages:
             if route:
                 results.append(self.route_message(message, skip_preflight=True))
-            else:
-                results.append(
-                    RouteResult(
-                        status="candidate",
-                        action="scan",
-                        path=str(message.path),
-                        details=message.to_summary(),
+                continue
+            classification = self.classify_message(message, state)
+            if classification.routed:
+                if include_routed:
+                    results.append(
+                        RouteResult(
+                            status="skipped",
+                            action=classification.action,
+                            path=str(message.path),
+                            details={**message.to_summary(), **classification.to_dict()},
+                        )
                     )
+                continue
+            results.append(
+                RouteResult(
+                    status="candidate",
+                    action="scan",
+                    path=str(message.path),
+                    details={**message.to_summary(), **classification.to_dict()},
                 )
+            )
         return results
 
     def route_path(self, path: str | Path, *, skip_preflight: bool = False) -> RouteResult:
@@ -187,18 +243,9 @@ class Router:
                 return self._preflight_failure_result(preflight, action="route", path=str(message.path))
         state = self.load_state()
         message_key = str(message.path)
-        if message.status in {"routed", "resolved"}:
-            return RouteResult(status="skipped", action="status", path=message_key, details={"reason": message.status})
-        if state["messages"].get(message_key, {}).get("status") == "routed":
-            return RouteResult(status="skipped", action="state", path=message_key, details={"reason": "already routed"})
-        dedupe_key = message.frontmatter.get("dedupe_key")
-        if dedupe_key and dedupe_key in state["dedupe"]:
-            return RouteResult(
-                status="skipped",
-                action="dedupe",
-                path=message_key,
-                details={"reason": "dedupe_key already routed", "dedupe_key": dedupe_key},
-            )
+        classification = self.classify_message(message, state)
+        if classification.routed:
+            return RouteResult(status="skipped", action=classification.action, path=message_key, details=classification.details)
 
         if message.message_type == "task_request":
             return self._route_task_request(message, state)
@@ -282,6 +329,32 @@ class Router:
         dedupe_key = message.frontmatter.get("dedupe_key")
         if dedupe_key:
             state["dedupe"][str(dedupe_key)] = record
+
+    def classify_message(self, message: Message, state: dict[str, Any] | None = None) -> MessageState:
+        active_state = state if state is not None else self.load_state()
+        if message.status in {"routed", "resolved"}:
+            return MessageState(True, "status", {"reason": message.status, "matched_on": "status"})
+
+        message_key = str(message.path)
+        if self._record_is_routed(active_state["messages"].get(message_key)):
+            return MessageState(True, "state", {"reason": "already routed", "matched_on": "path"})
+
+        message_id = message.frontmatter.get("id")
+        if message_id and self._record_is_routed(active_state["messages"].get(f"id:{message_id}")):
+            return MessageState(True, "state", {"reason": "already routed", "matched_on": "id", "id": str(message_id)})
+
+        dedupe_key = message.frontmatter.get("dedupe_key")
+        if dedupe_key and self._record_is_routed(active_state["dedupe"].get(str(dedupe_key))):
+            return MessageState(
+                True,
+                "dedupe",
+                {"reason": "dedupe_key already routed", "matched_on": "dedupe_key", "dedupe_key": str(dedupe_key)},
+            )
+
+        return MessageState(False, "pending", {})
+
+    def _record_is_routed(self, record: Any) -> bool:
+        return isinstance(record, dict) and record.get("status") == "routed"
 
     def _build_issue_body(self, message: Message) -> str:
         metadata = {

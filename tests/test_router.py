@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -8,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from handoff_router.config import RouterConfig
-from handoff_router.cli import cmd_scan, cmd_self_check
+from handoff_router.cli import cmd_scan, cmd_self_check, cmd_status
 from handoff_router.router import PreflightCheck, Router
 
 
@@ -206,6 +207,51 @@ class RouterTests(unittest.TestCase):
             self.assertEqual(results[0].action, "ignore")
             self.assertEqual(results[0].path, str(path))
 
+    def test_scan_excludes_routed_message_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            path = repo / "projects" / "demo" / "inbox" / "chatgpt" / "open" / "task.md"
+            path.parent.mkdir(parents=True)
+            path.write_text(TASK_MESSAGE, encoding="utf-8")
+            router, _, _ = self.make_router(repo)
+            router.save_state({"messages": {str(path): {"status": "routed"}}, "dedupe": {}})
+
+            results = router.scan(pull=False)
+
+            self.assertEqual(results, [])
+
+    def test_scan_include_routed_shows_skipped_state_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            path = repo / "projects" / "demo" / "inbox" / "chatgpt" / "open" / "task.md"
+            path.parent.mkdir(parents=True)
+            path.write_text(TASK_MESSAGE, encoding="utf-8")
+            router, _, _ = self.make_router(repo)
+            router.save_state({"messages": {str(path): {"status": "routed"}}, "dedupe": {}})
+
+            results = router.scan(pull=False, include_routed=True)
+
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0].status, "skipped")
+            self.assertEqual(results[0].action, "state")
+            self.assertEqual(results[0].details["matched_on"], "path")
+
+    def test_dedupe_key_state_classifies_message_as_routed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            path = repo / "projects" / "demo" / "inbox" / "chatgpt" / "open" / "task.md"
+            path.parent.mkdir(parents=True)
+            path.write_text(TASK_MESSAGE, encoding="utf-8")
+            router, _, _ = self.make_router(repo)
+            router.save_state({"messages": {}, "dedupe": {"task-1": {"status": "routed"}}})
+
+            inventory = router.message_inventory()
+
+            self.assertEqual(inventory["pending_messages"], 0)
+            self.assertEqual(inventory["routed_messages"], 1)
+            self.assertTrue(inventory["messages"][0]["routed"])
+            self.assertEqual(inventory["messages"][0]["matched_on"], "dedupe_key")
+
     def test_cli_scan_default_excludes_legacy_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -235,6 +281,7 @@ class RouterTests(unittest.TestCase):
                             "route": False,
                             "no_pull": True,
                             "include_legacy": False,
+                            "include_routed": False,
                             "once": True,
                         },
                     )()
@@ -242,6 +289,41 @@ class RouterTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             self.assertEqual(write.call_args_list, [])
+
+    def test_status_counts_pending_vs_routed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            config_path = repo / "config.yaml"
+            pending_path = repo / "projects" / "demo" / "inbox" / "chatgpt" / "open" / "pending.md"
+            routed_path = repo / "projects" / "demo" / "inbox" / "chatgpt" / "open" / "routed.md"
+            pending_path.parent.mkdir(parents=True)
+            pending_path.write_text(TASK_MESSAGE.replace("title: Demo task", "title: Pending task"), encoding="utf-8")
+            routed_path.write_text(TASK_MESSAGE.replace("title: Demo task", "title: Routed task"), encoding="utf-8")
+            config_path.write_text(
+                "\n".join(
+                    [
+                        f"handoff_repo_path: {repo}",
+                        f"state_path: {repo / 'state.json'}",
+                        "pull_before_scan: false",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (repo / "state.json").write_text(
+                json.dumps({"messages": {str(routed_path): {"status": "routed"}}, "dedupe": {}}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = cmd_status(type("Args", (), {"config": str(config_path)})())
+
+            self.assertEqual(exit_code, 0)
+            output = stdout.getvalue()
+            self.assertIn("messages: 2", output)
+            self.assertIn("pending_messages: 1", output)
+            self.assertIn("routed_messages: 1", output)
 
     def test_route_aborts_before_create_issue_when_state_parent_preflight_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

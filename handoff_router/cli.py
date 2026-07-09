@@ -5,7 +5,7 @@ import json
 import sys
 
 from .config import DEFAULT_CONFIG_PATH, dump_example_config, load_config
-from .messages import MessageError, discover_messages, parse_message
+from .messages import MessageError, parse_message
 from .router import Router
 
 
@@ -21,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--route", action="store_true")
     scan.add_argument("--no-pull", action="store_true")
     scan.add_argument("--include-legacy", action="store_true")
+    scan.add_argument("--include-routed", action="store_true")
 
     route = subparsers.add_parser("route")
     route.add_argument("path")
@@ -41,7 +42,17 @@ def build_parser() -> argparse.ArgumentParser:
 def cmd_status(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     router = Router(config)
-    messages, errors, legacy = router.candidate_messages() if config.handoff_repo_dir.exists() else ([], [], [])
+    inventory = (
+        router.message_inventory()
+        if config.handoff_repo_dir.exists()
+        else {
+            "messages": [],
+            "pending_messages": 0,
+            "routed_messages": 0,
+            "legacy_ignored": 0,
+            "parse_errors": 0,
+        }
+    )
     state_exists = config.state_file.exists()
     print(f"config: {args.config}")
     print(f"handoff_repo_path: {config.handoff_repo_path}")
@@ -49,16 +60,23 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"state_path: {config.state_path}")
     print(f"state_exists: {state_exists}")
     print(f"dry_run: {config.dry_run}")
-    print(f"messages: {len(messages)}")
-    print(f"legacy_ignored: {len(legacy)}")
-    print(f"parse_errors: {len(errors)}")
+    print(f"messages: {len(inventory['messages'])}")
+    print(f"pending_messages: {inventory['pending_messages']}")
+    print(f"routed_messages: {inventory['routed_messages']}")
+    print(f"legacy_ignored: {inventory['legacy_ignored']}")
+    print(f"parse_errors: {inventory['parse_errors']}")
     return 0
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     router = Router(config)
-    results = router.scan(route=args.route, pull=not args.no_pull, include_legacy=args.include_legacy)
+    results = router.scan(
+        route=args.route,
+        pull=not args.no_pull,
+        include_legacy=args.include_legacy,
+        include_routed=args.include_routed,
+    )
     for result in results:
         print(json.dumps(result.to_dict(), sort_keys=True))
     if args.route and any(result.status == "failed" and result.action == "preflight" for result in results):
@@ -76,8 +94,19 @@ def cmd_route(args: argparse.Namespace) -> int:
 
 def cmd_messages(args: argparse.Namespace) -> int:
     config = load_config(args.config)
-    messages, errors, legacy = discover_messages(config) if config.handoff_repo_dir.exists() else ([], [], [])
-    payload = {"messages": [message.to_summary() for message in messages], "errors": errors, "legacy": legacy}
+    if config.handoff_repo_dir.exists():
+        router = Router(config)
+        payload = router.message_inventory()
+    else:
+        payload = {
+            "messages": [],
+            "pending_messages": 0,
+            "routed_messages": 0,
+            "legacy_ignored": 0,
+            "parse_errors": 0,
+            "errors": [],
+            "legacy": [],
+        }
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
