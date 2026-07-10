@@ -339,6 +339,9 @@ class Router:
         if missing_optional:
             if self.config.auto_create_missing_labels:
                 for label in missing_optional:
+                    if label in existing_labels:
+                        applied.append(label)
+                        continue
                     self.github.create_label(repo, label)
                     existing_labels.add(label)
                     applied.append(label)

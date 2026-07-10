@@ -227,6 +227,31 @@ class RouterTests(unittest.TestCase):
             self.assertEqual(second[0].status, "skipped")
             self.assertEqual(len(github.created), 1)
 
+    def test_auto_create_does_not_create_duplicate_optional_ready_label(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            path = repo / "projects" / "demo" / "inbox" / "chatgpt" / "open" / "task.md"
+            path.parent.mkdir(parents=True)
+            message = TASK_MESSAGE.replace("  - bug", "  - agent:ready")
+            path.write_text(message, encoding="utf-8")
+            github = FakeGitHub()
+            git = FakeGitOps()
+            config = RouterConfig(
+                handoff_repo_path=str(repo),
+                state_path=str(repo / "var" / "state.json"),
+                pull_before_scan=False,
+                commit_after_route=False,
+                auto_create_missing_labels=True,
+            )
+            router = Router(config, github_client=github, git_ops=git)
+            github.labels_by_repo["lipnivan/demo"] = set()
+
+            result = router.route_path(path)
+
+            self.assertEqual(result.status, "routed")
+            self.assertEqual(github.created_labels, [("lipnivan/demo", "agent:ready")])
+            self.assertEqual(github.created[0][3], ["agent:ready"])
+
     def test_auto_create_missing_labels_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
