@@ -21,6 +21,8 @@ When `type=task_request`, `action=create_issue`, and `target_repo` is set:
 - title comes from frontmatter `title`, first Markdown heading, or filename
 - body is original body plus metadata footer
 - labels come from frontmatter plus default ready label unless disabled
+- the default ready label is treated as critical and must be applied or routing fails
+- missing optional message labels are skipped with a warning unless config enables auto-create
 - success writes state and a routed report
 
 ## Context

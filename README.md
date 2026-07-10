@@ -61,6 +61,7 @@ Default settings:
 - `handoff_repo: lipnivan/agent-handoff`
 - `state_path: /var/lib/agent-handoff-router/state.json`
 - `default_ready_label: agent:ready`
+- `auto_create_missing_labels: false`
 - `dry_run: false`
 - `pull_before_scan: true`
 - `commit_after_route: true`
@@ -71,7 +72,9 @@ Default settings:
   - creates a GitHub issue in the target repo
   - uses frontmatter title, first heading, or filename as the issue title
   - appends handoff metadata to the issue body
-  - adds requested labels plus `agent:ready` unless disabled
+  - treats `agent:ready` as a critical routing label unless explicitly disabled
+  - skips missing optional message labels with a warning by default
+  - can auto-create missing labels when `auto_create_missing_labels: true`
 - `context` with `related_repo` and `related_issue`
   - comments on the related issue
 - `report`
