@@ -2,6 +2,7 @@ handoff_repo_path: /opt/agent-handoff
 handoff_repo: lipnivan/agent-handoff
 state_path: /var/lib/agent-handoff-router/state.json
 default_ready_label: agent:ready
+auto_create_missing_labels: false
 dry_run: false
 pull_before_scan: true
 commit_after_route: true

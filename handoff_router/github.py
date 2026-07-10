@@ -39,6 +39,25 @@ class GitHubClient:
         number = int(url.rstrip("/").split("/")[-1])
         return {"number": number, "url": url}
 
+    def list_labels(self, repo: str) -> set[str]:
+        if self.dry_run:
+            return set()
+        output = self._run(["label", "list", "--repo", repo, "--limit", "1000", "--json", "name"])
+        payload = json.loads(output or "[]")
+        return {str(entry["name"]) for entry in payload if "name" in entry}
+
+    def create_label(
+        self,
+        repo: str,
+        name: str,
+        color: str = "D4C5F9",
+        description: str = "Created by agent-handoff-router",
+    ) -> dict[str, str]:
+        if self.dry_run:
+            return {"name": name}
+        self._run(["label", "create", name, "--repo", repo, "--color", color, "--description", description])
+        return {"name": name}
+
     def comment_issue(self, repo: str, issue_number: int, body: str) -> dict[str, str | int]:
         if self.dry_run:
             return {"issue_number": issue_number, "url": f"https://github.com/{repo}/issues/{issue_number}#dry-run"}

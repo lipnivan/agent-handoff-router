@@ -17,6 +17,7 @@ class RouterConfig:
     handoff_repo: str = "lipnivan/agent-handoff"
     state_path: str = "/var/lib/agent-handoff-router/state.json"
     default_ready_label: str = "agent:ready"
+    auto_create_missing_labels: bool = False
     dry_run: bool = False
     pull_before_scan: bool = True
     commit_after_route: bool = True

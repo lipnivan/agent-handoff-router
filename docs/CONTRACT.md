@@ -16,6 +16,7 @@ Optional fields:
 - `target_repo`
 - `action`
 - `labels`
+  Message labels are optional. Missing labels are skipped by default, but the router's default ready label remains critical unless explicitly disabled.
 - `priority`
 - `related_repo`
 - `related_issue`

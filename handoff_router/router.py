@@ -9,7 +9,7 @@ from typing import Any
 
 from .config import RouterConfig
 from .git_ops import GitError, GitOps
-from .github import GitHubClient
+from .github import GitHubClient, GitHubError
 from .messages import Message, MessageError, discover_messages, parse_message
 from .utils import now_utc_iso, read_json_file, sanitize_filename, write_json_file
 
@@ -263,10 +263,19 @@ class Router:
         if not repo or action != "create_issue":
             return self._record_terminal(message, state, "failed", "task_request", error="task_request requires action=create_issue and target_repo")
 
-        labels = [str(label) for label in message.frontmatter.get("labels", [])]
+        optional_labels = [str(label) for label in message.frontmatter.get("labels", [])]
+        critical_labels: list[str] = []
         if not message.frontmatter.get("disable_default_ready_label", False):
-            labels = labels + [self.config.default_ready_label]
-        labels = sorted(dict.fromkeys(labels))
+            critical_labels.append(self.config.default_ready_label)
+
+        try:
+            labels, label_warnings = self._prepare_issue_labels(
+                str(repo),
+                optional_labels=optional_labels,
+                critical_labels=critical_labels,
+            )
+        except GitHubError as exc:
+            return self._record_terminal(message, state, "failed", "create_issue", error=str(exc))
 
         title = message.effective_title()
         body = self._build_issue_body(message)
@@ -276,13 +285,71 @@ class Router:
             "type": "task_request",
             "issue": issue,
             "repo": repo,
+            "labels": labels,
             "updated_at": now_utc_iso(),
         }
+        if label_warnings:
+            record["warnings"] = label_warnings
         self._record_state(state, message, record)
         report_path = self._write_routed_report(message, issue=issue)
         self.save_state(state)
         self._commit_outputs_if_needed([self.config.state_file, report_path])
-        return RouteResult(status="routed", action="create_issue", path=str(message.path), details={"issue": issue, "report_path": str(report_path)})
+        details: dict[str, Any] = {
+            "issue": issue,
+            "labels": labels,
+            "report_path": str(report_path),
+        }
+        if label_warnings:
+            details["warnings"] = label_warnings
+        return RouteResult(status="routed", action="create_issue", path=str(message.path), details=details)
+
+    def _prepare_issue_labels(
+        self,
+        repo: str,
+        *,
+        optional_labels: list[str],
+        critical_labels: list[str],
+    ) -> tuple[list[str], list[str]]:
+        labels = sorted(dict.fromkeys([*optional_labels, *critical_labels]))
+        if self.config.dry_run or not labels:
+            return labels, []
+
+        existing_labels = self.github.list_labels(repo)
+        applied: list[str] = []
+        warnings: list[str] = []
+        missing_optional: list[str] = []
+
+        for label in sorted(dict.fromkeys(optional_labels)):
+            if label in existing_labels:
+                applied.append(label)
+            else:
+                missing_optional.append(label)
+
+        for label in sorted(dict.fromkeys(critical_labels)):
+            if label in existing_labels:
+                applied.append(label)
+                continue
+            if self.config.auto_create_missing_labels:
+                self.github.create_label(repo, label)
+                existing_labels.add(label)
+                applied.append(label)
+                continue
+            raise GitHubError(f"critical label missing in {repo}: {label}")
+
+        if missing_optional:
+            if self.config.auto_create_missing_labels:
+                for label in missing_optional:
+                    if label in existing_labels:
+                        applied.append(label)
+                        continue
+                    self.github.create_label(repo, label)
+                    existing_labels.add(label)
+                    applied.append(label)
+            else:
+                skipped = ", ".join(missing_optional)
+                warnings.append(f"skipped missing optional labels in {repo}: {skipped}")
+
+        return sorted(dict.fromkeys(applied)), warnings
 
     def _route_context(self, message: Message, state: dict[str, Any]) -> RouteResult:
         repo = message.frontmatter.get("related_repo")

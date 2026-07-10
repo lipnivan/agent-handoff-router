@@ -72,6 +72,8 @@ class FakeGitHub:
     def __init__(self) -> None:
         self.created: list[tuple[str, str, str, list[str]]] = []
         self.commented: list[tuple[str, int, str]] = []
+        self.labels_by_repo: dict[str, set[str]] = {}
+        self.created_labels: list[tuple[str, str]] = []
 
     def create_issue(self, repo: str, title: str, body: str, labels: list[str]) -> dict[str, str | int]:
         self.created.append((repo, title, body, labels))
@@ -80,6 +82,20 @@ class FakeGitHub:
     def comment_issue(self, repo: str, issue_number: int, body: str) -> dict[str, str | int]:
         self.commented.append((repo, issue_number, body))
         return {"issue_number": issue_number, "url": f"https://github.com/{repo}/issues/{issue_number}#issuecomment-1"}
+
+    def list_labels(self, repo: str) -> set[str]:
+        return set(self.labels_by_repo.get(repo, set()))
+
+    def create_label(
+        self,
+        repo: str,
+        name: str,
+        color: str = "D4C5F9",
+        description: str = "Created by agent-handoff-router",
+    ) -> dict[str, str]:
+        self.labels_by_repo.setdefault(repo, set()).add(name)
+        self.created_labels.append((repo, name))
+        return {"name": name}
 
 
 class FakeGitOps:
@@ -115,6 +131,7 @@ class RouterTests(unittest.TestCase):
             path.parent.mkdir(parents=True)
             path.write_text(TASK_MESSAGE, encoding="utf-8")
             router, github, _ = self.make_router(repo)
+            github.labels_by_repo["lipnivan/demo"] = {"agent:ready"}
 
             result = router.route_path(path)
 
@@ -123,6 +140,7 @@ class RouterTests(unittest.TestCase):
             state = router.load_state()
             self.assertEqual(state["messages"][str(path)]["issue"]["number"], 11)
             self.assertIn("task-1", state["dedupe"])
+            self.assertEqual(github.created[0][3], ["agent:ready"])
 
     def test_context_comments_related_issue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -136,6 +154,127 @@ class RouterTests(unittest.TestCase):
 
             self.assertEqual(result.status, "routed")
             self.assertEqual(github.commented[0][1], 17)
+
+    def test_missing_optional_label_is_skipped_with_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            path = repo / "projects" / "demo" / "inbox" / "chatgpt" / "open" / "task.md"
+            path.parent.mkdir(parents=True)
+            path.write_text(TASK_MESSAGE, encoding="utf-8")
+            router, github, _ = self.make_router(repo)
+            github.labels_by_repo["lipnivan/demo"] = {"agent:ready"}
+
+            result = router.route_path(path)
+
+            self.assertEqual(result.status, "routed")
+            self.assertEqual(github.created[0][3], ["agent:ready"])
+            self.assertEqual(
+                result.details["warnings"],
+                ["skipped missing optional labels in lipnivan/demo: bug"],
+            )
+            state = router.load_state()
+            self.assertEqual(
+                state["messages"][str(path)]["warnings"],
+                ["skipped missing optional labels in lipnivan/demo: bug"],
+            )
+
+    def test_missing_critical_ready_label_fails_clearly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            path = repo / "projects" / "demo" / "inbox" / "chatgpt" / "open" / "task.md"
+            path.parent.mkdir(parents=True)
+            path.write_text(TASK_MESSAGE, encoding="utf-8")
+            router, github, _ = self.make_router(repo)
+            github.labels_by_repo["lipnivan/demo"] = {"bug"}
+
+            result = router.route_path(path)
+
+            self.assertEqual(result.status, "failed")
+            self.assertEqual(result.action, "create_issue")
+            self.assertEqual(result.details["error"], "critical label missing in lipnivan/demo: agent:ready")
+            self.assertEqual(github.created, [])
+
+    def test_existing_labels_are_applied(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            path = repo / "projects" / "demo" / "inbox" / "chatgpt" / "open" / "task.md"
+            path.parent.mkdir(parents=True)
+            path.write_text(TASK_MESSAGE, encoding="utf-8")
+            router, github, _ = self.make_router(repo)
+            github.labels_by_repo["lipnivan/demo"] = {"bug", "agent:ready"}
+
+            result = router.route_path(path)
+
+            self.assertEqual(result.status, "routed")
+            self.assertEqual(github.created[0][3], ["agent:ready", "bug"])
+            self.assertNotIn("warnings", result.details)
+
+    def test_route_is_idempotent_after_skipping_missing_optional_label(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            path = repo / "projects" / "demo" / "inbox" / "chatgpt" / "open" / "task.md"
+            path.parent.mkdir(parents=True)
+            path.write_text(TASK_MESSAGE, encoding="utf-8")
+            router, github, _ = self.make_router(repo)
+            github.labels_by_repo["lipnivan/demo"] = {"agent:ready"}
+
+            first = router.scan(route=True, pull=False)
+            second = router.scan(route=True, pull=False)
+
+            self.assertEqual(len(first), 1)
+            self.assertEqual(first[0].status, "routed")
+            self.assertEqual(len(second), 1)
+            self.assertEqual(second[0].status, "skipped")
+            self.assertEqual(len(github.created), 1)
+
+    def test_auto_create_does_not_create_duplicate_optional_ready_label(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            path = repo / "projects" / "demo" / "inbox" / "chatgpt" / "open" / "task.md"
+            path.parent.mkdir(parents=True)
+            message = TASK_MESSAGE.replace("  - bug", "  - agent:ready")
+            path.write_text(message, encoding="utf-8")
+            github = FakeGitHub()
+            git = FakeGitOps()
+            config = RouterConfig(
+                handoff_repo_path=str(repo),
+                state_path=str(repo / "var" / "state.json"),
+                pull_before_scan=False,
+                commit_after_route=False,
+                auto_create_missing_labels=True,
+            )
+            router = Router(config, github_client=github, git_ops=git)
+            github.labels_by_repo["lipnivan/demo"] = set()
+
+            result = router.route_path(path)
+
+            self.assertEqual(result.status, "routed")
+            self.assertEqual(github.created_labels, [("lipnivan/demo", "agent:ready")])
+            self.assertEqual(github.created[0][3], ["agent:ready"])
+
+    def test_auto_create_missing_labels_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            path = repo / "projects" / "demo" / "inbox" / "chatgpt" / "open" / "task.md"
+            path.parent.mkdir(parents=True)
+            path.write_text(TASK_MESSAGE, encoding="utf-8")
+            github = FakeGitHub()
+            git = FakeGitOps()
+            config = RouterConfig(
+                handoff_repo_path=str(repo),
+                state_path=str(repo / "var" / "state.json"),
+                pull_before_scan=False,
+                commit_after_route=False,
+                auto_create_missing_labels=True,
+            )
+            router = Router(config, github_client=github, git_ops=git)
+            github.labels_by_repo["lipnivan/demo"] = set()
+
+            result = router.route_path(path)
+
+            self.assertEqual(result.status, "routed")
+            self.assertEqual(github.created_labels, [("lipnivan/demo", "agent:ready"), ("lipnivan/demo", "bug")])
+            self.assertEqual(github.created[0][3], ["agent:ready", "bug"])
 
     def test_already_routed_dedupe_skips_duplicate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
