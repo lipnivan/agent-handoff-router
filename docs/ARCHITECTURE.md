@@ -63,21 +63,36 @@ The ChatGPT GitHub connector is a temporary rescue/fallback path while Drive ing
 - Router state is idempotency and diagnostics only; it is not lifecycle truth.
 - Doctor/PWA state is read-only derived state and must not be treated as authoritative mutation state.
 
-## Lifecycle and Ball Owner
+## Canonical Ball-Owner Contract
 
-Use GitHub state plus handoff artifacts to determine the current ball owner:
+Schema: `agent-handoff-ball-owner/v1`.
+Version: `2026-07-15.1`.
 
-- New command: ball is with bridge/router until a GitHub issue or comment is created.
-- `agent:ready`: ball is with `agent-runner`; this is the only runner pickup label.
-- Claimed/running: ball is with `agent-runner` and Codex in an isolated worktree.
-- Draft PR opened: ball is with review collection.
-- PR bundle published: ball is with ChatGPT for review.
-- `REQUEST_CHANGES`: ball returns to runner on the same issue, branch, and PR after the continuation is posted and `agent:ready` is applied.
-- `APPROVE`: ball moves to human owner for final review and merge.
-- Admin action needed: ball is with human/admin approver until explicit approval is granted.
-- Blocked or outage: ball is with the component owner of the unavailable dependency.
+Doctor/PWA, new ChatGPT chats, and human operators must use this enum when deriving current task ownership. Do not create a second state vocabulary in bootstrap, current-state, or component docs.
 
-Do not invent `agent:review` as the runner pickup label. `agent:review` is a review lifecycle state meaning the ball is with the architect/ChatGPT review path; runner pickup remains only `agent:ready`. After `REQUEST_CHANGES`, continuation should keep the same issue, branch, and PR, then reapply `agent:ready` for runner pickup.
+| State | Meaning | Minimal Evidence |
+| --- | --- | --- |
+| `codex_queue` | Runner pickup is queued. | Open GitHub issue has `agent:ready` and no stronger evidence that runner has claimed it. |
+| `codex_running` | Runner/Codex owns execution. | Runner claim, active runner report, in-progress handoff artifact, or branch/worktree evidence tied to the issue. |
+| `architect_review` | Architect/ChatGPT review owns the next decision. | Current PR review bundle or review-request artifact exists for the PR head SHA, or lifecycle label/state explicitly marks review. |
+| `codex_followup` | Requested changes are waiting to be continued by runner on the same issue, branch, and PR. | Head-SHA-anchored `REQUEST_CHANGES` decision or equivalent review comment plus continuation/requeue intent. |
+| `human_merge` | Human owner owns final review and merge decision. | Head-SHA-anchored approval, ready-for-owner-review state, or equivalent human-review request. |
+| `admin_action` | Human/admin approval or privileged action is required before progress can continue. | Explicit escalation for deployment, `sudo`, secrets, production infrastructure, firewall/systemd/router config, merge authority, or other admin-only action. |
+| `external_blocker` | Progress is blocked by an unavailable external dependency or outage. | Sanitized outage/blocker report for Drive, bridge, runner, GitHub, connector, credentials, or another dependency outside the current actor's control. |
+| `done` | Task lifecycle is complete. | Merged/closed PR or issue, explicit completed state, or human-confirmed completion. |
+| `unknown` | Ownership cannot be derived safely. | Evidence is missing, contradictory, stale, or belongs only to a non-authoritative surface. |
+
+Precedence rules:
+
+1. Prefer GitHub issue, PR, review, branch, label, and merge state over Drive, bridge, router, handoff, reviewer, Doctor, or PWA snapshots.
+2. Treat explicit `admin_action` and `external_blocker` evidence as stronger than normal queue/review states until the escalation or blocker is resolved.
+3. Treat merged/closed completion evidence as `done` unless a newer linked issue or PR shows follow-up work.
+4. Treat a valid `REQUEST_CHANGES` decision as `codex_followup` until the same issue/branch/PR is rearmed with `agent:ready` and runner has picked it up.
+5. Treat a valid approval or ready-for-owner-review state as `human_merge`; agents still must not merge or deploy.
+6. A draft PR by itself does not imply `architect_review`. Use `architect_review` only when there is review-bundle, review-request, or explicit review lifecycle evidence for the current PR head.
+7. If current evidence conflicts and no precedence rule resolves it, report `unknown` and collect fresh GitHub and handoff evidence before mutating state.
+
+`agent:ready` is the only runner pickup label. Do not invent `agent:review` as a pickup label. `agent:review` may be used only as a review lifecycle state meaning the ball is with the architect/ChatGPT review path.
 
 ## Trust and Credential Boundaries
 

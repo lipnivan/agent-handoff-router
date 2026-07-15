@@ -6,7 +6,7 @@ This is the single canonical entry point for reconstructing the current AI-agent
 
 ## Read First
 
-1. [ARCHITECTURE.md](ARCHITECTURE.md) - component responsibilities, source-of-truth boundaries, lifecycle states, trust boundaries, and safety rules.
+1. [ARCHITECTURE.md](ARCHITECTURE.md) - component responsibilities, source-of-truth boundaries, canonical ball-owner enum, trust boundaries, and safety rules.
 2. [OPERATIONAL-WORKFLOW.md](OPERATIONAL-WORKFLOW.md) - task creation, runner execution, review, continuation, approval, escalation, and recovery.
 3. [CHATGPT-HANDOFF-BOOTSTRAP.md](CHATGPT-HANDOFF-BOOTSTRAP.md) - ordered reading list, exact new-chat rules, live-state discovery, and copy/paste bootstrap prompt.
 4. [CURRENT-STATE.md](CURRENT-STATE.md) - versioned manifest of repository, deployment, planned, and limited behavior.
@@ -21,6 +21,7 @@ This is the single canonical entry point for reconstructing the current AI-agent
 - Runner claims only `agent:ready`, works in isolated worktrees, and never merges or deploys.
 - Architect/ChatGPT reviews; the human owner owns merge, deploy, and admin approval.
 - Doctor/PWA is read-only and visualizes current task state and ball ownership.
+- Ball-owner state must use the canonical `agent-handoff-ball-owner/v1` enum in [ARCHITECTURE.md](ARCHITECTURE.md#canonical-ball-owner-contract).
 - Never run `sudo`, deploy production, merge PRs, handle secrets, or mutate firewall/systemd/router configs without explicit escalation.
 
 ## Component Docs

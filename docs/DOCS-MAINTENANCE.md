@@ -11,7 +11,7 @@ Update [INDEX.md](INDEX.md), [ARCHITECTURE.md](ARCHITECTURE.md), [CHATGPT-HANDOF
 - primary command/mutation transport;
 - fallback connector policy;
 - source-of-truth boundaries;
-- runner pickup labels or lifecycle labels;
+- runner pickup labels, lifecycle labels, or canonical ball-owner enum states;
 - branch, PR, review, or merge ownership;
 - bridge command schema or dispatch behavior;
 - PR bundle schema or review decision schema;
@@ -54,6 +54,7 @@ Before finishing a docs maintenance change:
 - verify local Markdown links resolve;
 - verify component repository/path references are current;
 - verify `agent:ready` is the runner pickup label;
+- verify ball-owner terms reference the canonical `agent-handoff-ball-owner/v1` enum instead of defining a second vocabulary;
 - verify primary/fallback wording still says Drive/bridge is primary and the ChatGPT GitHub connector is fallback/rescue only;
 - verify bootstrap text contains no secrets, tokens, or machine-specific credentials;
 - verify no doc grants ChatGPT, runner, bridge, router, reviewer, Doctor, or PWA permission to merge, deploy, run `sudo`, or handle secrets.

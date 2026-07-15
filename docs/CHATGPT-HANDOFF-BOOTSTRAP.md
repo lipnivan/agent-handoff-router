@@ -9,7 +9,7 @@ Use this document when starting a new ChatGPT chat, Codex runner session, or hum
 Read in this order:
 
 1. [INDEX.md](INDEX.md) for the canonical entry point and component links.
-2. [ARCHITECTURE.md](ARCHITECTURE.md) for source-of-truth and safety boundaries.
+2. [ARCHITECTURE.md](ARCHITECTURE.md) for source-of-truth, safety boundaries, and the canonical `agent-handoff-ball-owner/v1` enum.
 3. [CURRENT-STATE.md](CURRENT-STATE.md) for repository, deployment, and planned status.
 4. [OPERATIONAL-WORKFLOW.md](OPERATIONAL-WORKFLOW.md) for task, review, continuation, approval, and recovery flow.
 5. Component docs only as needed for the action being taken.
@@ -39,6 +39,7 @@ Prefer repository docs over stale chat text. If local paths are available on `.3
 - Runner claims only `agent:ready`, works in isolated worktrees, and never merges or deploys.
 - Architect/ChatGPT reviews; the human owner owns merge, deploy, and admin approval.
 - Doctor/PWA is read-only and visualizes current task state and ball ownership.
+- Ball-owner state must use the canonical `agent-handoff-ball-owner/v1` enum in [ARCHITECTURE.md](ARCHITECTURE.md#canonical-ball-owner-contract); do not create a parallel state vocabulary.
 - Do not run `sudo`, deploy production, merge PRs, handle secrets, or mutate firewall/systemd/router configs without explicit escalation.
 - Continue `REQUEST_CHANGES` on the same issue, branch, and PR unless a human owner decides otherwise.
 - Review decisions must be anchored to the current PR head SHA.
@@ -86,6 +87,7 @@ Preserve these rules:
 - agent-runner claims only agent:ready, uses isolated worktrees, and never merges or deploys.
 - ChatGPT reviews; the human owner owns merge, deploy, and admin approval.
 - Doctor/PWA is read-only status and ball-owner visualization.
+- Ball-owner state must use the canonical agent-handoff-ball-owner/v1 enum in ARCHITECTURE.md.
 - Never run sudo, deploy prod, merge PRs, handle secrets, or change firewall/systemd/router configs without explicit escalation.
 
 Before taking action, discover current GitHub issue/PR state and current handoff artifacts. Do not trust stale chat text.
