@@ -10,7 +10,7 @@ Read in this order:
 
 1. [INDEX.md](INDEX.md) for the canonical entry point and component links.
 2. [ARCHITECTURE.md](ARCHITECTURE.md) for source-of-truth and safety boundaries.
-3. [CURRENT-STATE.md](CURRENT-STATE.md) for deployed, merged, and planned status.
+3. [CURRENT-STATE.md](CURRENT-STATE.md) for repository, deployment, and planned status.
 4. [OPERATIONAL-WORKFLOW.md](OPERATIONAL-WORKFLOW.md) for task, review, continuation, approval, and recovery flow.
 5. Component docs only as needed for the action being taken.
 
@@ -23,12 +23,12 @@ Central shared bootstrap:
 
 - `lipnivan/agent-handoff`: central message bus, audit trail, bootstrap docs, PR bundle docs, review decision docs.
 - `lipnivan/agent-handoff-router`: router docs and this canonical index.
-- `lipnivan/agent-drive-bridge`: Drive command transport, typed ingress, command dispatch docs.
+- `lipi-codex/agent-drive-bridge`: Drive command transport, typed ingress, command dispatch docs.
 - `lipnivan/agent-runner`: issue polling, isolated worktree execution, Codex invocation, draft PR creation.
 - `lipnivan/agent-reviewer`: read-only PR bundle collection and allowed review decision execution.
 - `lipnivan/agent-doctor`: read-only pipeline diagnostics and ball-owner visualization.
 
-Prefer repository docs over stale chat text. If local paths are available on `.39`, use the checked-out docs there for current deployed behavior. Otherwise inspect GitHub repository docs and current GitHub issue/PR state.
+Prefer repository docs over stale chat text. If local paths are available on `.39`, use them as local evidence for installed files only; do not infer merged or deployed state from a worktree alone. Inspect GitHub repository docs and current GitHub issue/PR state for repository truth, and inspect service/deployment state separately when that is authorized.
 
 ## Rules a New Chat Must Preserve
 

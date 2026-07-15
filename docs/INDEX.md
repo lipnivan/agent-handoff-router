@@ -9,7 +9,7 @@ This is the single canonical entry point for reconstructing the current AI-agent
 1. [ARCHITECTURE.md](ARCHITECTURE.md) - component responsibilities, source-of-truth boundaries, lifecycle states, trust boundaries, and safety rules.
 2. [OPERATIONAL-WORKFLOW.md](OPERATIONAL-WORKFLOW.md) - task creation, runner execution, review, continuation, approval, escalation, and recovery.
 3. [CHATGPT-HANDOFF-BOOTSTRAP.md](CHATGPT-HANDOFF-BOOTSTRAP.md) - ordered reading list, exact new-chat rules, live-state discovery, and copy/paste bootstrap prompt.
-4. [CURRENT-STATE.md](CURRENT-STATE.md) - versioned manifest of deployed, merged/documented, planned, and limited behavior.
+4. [CURRENT-STATE.md](CURRENT-STATE.md) - versioned manifest of repository, deployment, planned, and limited behavior.
 5. [DOCS-MAINTENANCE.md](DOCS-MAINTENANCE.md) - update triggers, ownership, stale-doc warning, and validation checklist.
 
 ## Non-Negotiable Architecture Rules
@@ -43,7 +43,7 @@ Component repositories:
 
 - `lipnivan/agent-handoff`
 - `lipnivan/agent-handoff-router`
-- `lipnivan/agent-drive-bridge`
+- `lipi-codex/agent-drive-bridge`
 - `lipnivan/agent-runner`
 - `lipnivan/agent-reviewer`
 - `lipnivan/agent-doctor`

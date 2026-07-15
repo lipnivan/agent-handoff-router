@@ -77,7 +77,7 @@ Use GitHub state plus handoff artifacts to determine the current ball owner:
 - Admin action needed: ball is with human/admin approver until explicit approval is granted.
 - Blocked or outage: ball is with the component owner of the unavailable dependency.
 
-Do not invent `agent:review` as the runner pickup label. `agent:review`, if present in older flows, is stale review lifecycle metadata and must not be used for pickup.
+Do not invent `agent:review` as the runner pickup label. `agent:review` is a review lifecycle state meaning the ball is with the architect/ChatGPT review path; runner pickup remains only `agent:ready`. After `REQUEST_CHANGES`, continuation should keep the same issue, branch, and PR, then reapply `agent:ready` for runner pickup.
 
 ## Trust and Credential Boundaries
 

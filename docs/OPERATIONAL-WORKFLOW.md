@@ -2,7 +2,7 @@
 
 Last verified: 2026-07-15.
 
-This workflow describes how work moves through the handoff stack. See [ARCHITECTURE.md](ARCHITECTURE.md) for component boundaries and [CURRENT-STATE.md](CURRENT-STATE.md) for deployed, merged, and planned status.
+This workflow describes how work moves through the handoff stack. See [ARCHITECTURE.md](ARCHITECTURE.md) for component boundaries and [CURRENT-STATE.md](CURRENT-STATE.md) for repository, deployment, and planned status.
 
 ## Create a Task
 
@@ -39,7 +39,7 @@ Review bundle details are canonical in `lipnivan/agent-handoff/docs/PR-REVIEW-BU
 2. The bridge or reviewer posts the continuation to the existing GitHub issue or PR.
 3. Continuation must stay on the same issue, branch, and PR unless a human explicitly chooses otherwise.
 4. Re-arm runner pickup by applying `agent:ready`.
-5. Remove stale lifecycle labels only after `agent:ready` succeeds and current PR head checks still match.
+5. Remove lifecycle labels that are no longer current only after `agent:ready` succeeds and current PR head checks still match.
 6. Runner resumes on the same task and updates the same draft PR.
 
 Head-SHA guards matter: if the PR head changed since review, collect a new bundle before treating a previous decision as actionable.
