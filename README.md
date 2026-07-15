@@ -12,6 +12,9 @@ This MVP scans a local clone of `lipnivan/agent-handoff`, validates structured M
 
 ## Bootstrap / operating context
 
+Canonical architecture and fresh-chat handoff entry point:
+- [docs/INDEX.md](docs/INDEX.md)
+
 For the shared operating context used across the handoff stack, read the central bootstrap doc in `lipnivan/agent-handoff`:
 - GitHub: `lipnivan/agent-handoff/docs/CHATGPT-BOOTSTRAP.md`
 - Local on `.39`: `/opt/agent-handoff/docs/CHATGPT-BOOTSTRAP.md`
@@ -86,12 +89,17 @@ Unsupported or malformed messages are recorded as failed in router state and are
 
 ## Systemd
 
-Example unit files are in [systemd/agent-handoff-router.service.example](/opt/agent-handoff-router/systemd/agent-handoff-router.service.example:1) and [systemd/agent-handoff-router.timer.example](/opt/agent-handoff-router/systemd/agent-handoff-router.timer.example:1). They are documentation/examples only. This bootstrap does not enable them.
+Example unit files are in [systemd/agent-handoff-router.service.example](systemd/agent-handoff-router.service.example) and [systemd/agent-handoff-router.timer.example](systemd/agent-handoff-router.timer.example). They are documentation/examples only. This bootstrap does not enable them.
 
 ## Examples and docs
 
-- Message examples: [examples/task_request.md](/opt/agent-handoff-router/examples/task_request.md:1), [examples/context_message.md](/opt/agent-handoff-router/examples/context_message.md:1), [examples/report_message.md](/opt/agent-handoff-router/examples/report_message.md:1), [examples/question_message.md](/opt/agent-handoff-router/examples/question_message.md:1)
-- Architecture: [docs/ARCHITECTURE.md](/opt/agent-handoff-router/docs/ARCHITECTURE.md:1)
-- Contract: [docs/CONTRACT.md](/opt/agent-handoff-router/docs/CONTRACT.md:1)
-- Message types: [docs/MESSAGE-TYPES.md](/opt/agent-handoff-router/docs/MESSAGE-TYPES.md:1)
-- Routing rules: [docs/ROUTING.md](/opt/agent-handoff-router/docs/ROUTING.md:1)
+- Message examples: [examples/task_request.md](examples/task_request.md), [examples/context_message.md](examples/context_message.md), [examples/report_message.md](examples/report_message.md), [examples/question_message.md](examples/question_message.md)
+- Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Canonical handoff index: [docs/INDEX.md](docs/INDEX.md)
+- Fresh-chat bootstrap: [docs/CHATGPT-HANDOFF-BOOTSTRAP.md](docs/CHATGPT-HANDOFF-BOOTSTRAP.md)
+- Current-state manifest: [docs/CURRENT-STATE.md](docs/CURRENT-STATE.md)
+- Operational workflow: [docs/OPERATIONAL-WORKFLOW.md](docs/OPERATIONAL-WORKFLOW.md)
+- Docs maintenance contract: [docs/DOCS-MAINTENANCE.md](docs/DOCS-MAINTENANCE.md)
+- Contract: [docs/CONTRACT.md](docs/CONTRACT.md)
+- Message types: [docs/MESSAGE-TYPES.md](docs/MESSAGE-TYPES.md)
+- Routing rules: [docs/ROUTING.md](docs/ROUTING.md)
